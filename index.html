@@ -487,7 +487,8 @@ function hitDecal(uv){const hx=uv.x*TW,hy=(1-uv.y)*TH;for(let i=D.length-1;i>=0;
     if(Math.abs(lx)<(d._w||100)/2+24&&Math.abs(ly)<(d._h||100)/2+24)return{d,mir}}}return null}
 
 let atex=null,tex=null,showSel=true,stroking=false,opac=1;
-function compose(){
+let cPend=false;function compose(){if(cPend)return;cPend=true;requestAnimationFrame(()=>{cPend=false;composeNow()})}
+function composeNow(){
   bx.globalAlpha=1;bx.globalCompositeOperation='source-over';
   bx.fillStyle=S.base;bx.fillRect(0,0,TW,TH);
   const key=[S.pat,S.acc,S.pin,S.patK,S.model].join();if(key!==compose.k){drawPattern(pcx,S.patK/100);compose.k=key}
@@ -498,10 +499,10 @@ function compose(){
   if(stroking&&tool!=='Eraser'){bx.globalAlpha=opac;bx.drawImage(strokeC,0,0);bx.globalAlpha=1}
   const trim={Chrome:'#d9dadc',Black:'#0e0e0e',Cream:'#efe6d2',Gold:'#c9a24a'}[S.rim]||S.base;bx.save();bx.strokeStyle=trim;bx.lineWidth=46;if(holePath(bx,TW,TH,0))bx.stroke();bx.fillStyle=trim;bx.fillRect(0,TH-30,TW,30);bx.restore();
   const c=cur();if(showSel&&c&&mode!=='paint')marker(bx,c);
-  if(tex)tex.needsUpdate=true}
+  if(tex){tex.needsUpdate=true;need=true}}
 
 /* ================= three.js ================= */
-let renderer,scene,cam,ctl,shell,liner,edge,visorM,strapG,group,snapsG,snapM,ok=false,ray=null,mv=null;
+let need=true,vis=false,renderer,scene,cam,ctl,shell,liner,edge,visorM,strapG,group,snapsG,snapM,ok=false,ray=null,mv=null;
 const stage=$('#stage'),cv=$('#cv');
 function profile(){const pts=[],N=60,am=M().amax;for(let i=0;i<=N;i++){const t=i/N,a=(1-t)*am;let r=Math.sin(a),y=Math.cos(a)*1.08;if(t<.08)r*=1-.04*(1-t/.08);pts.push(new THREE.Vector2(Math.max(r,.0001),y))}return pts}
 const rAt=y=>Math.sqrt(Math.max(0,1-(y/1.08)**2));
@@ -516,7 +517,7 @@ function buildModel(){drawAlpha();compose.k=null;if(!ok)return;const m=M(),pts=p
 function init(){
   if(typeof THREE==='undefined'){$('#tip').textContent='3D preview needs an internet connection';return}
   renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true,preserveDrawingBuffer:true});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.86;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.86;
   scene=new THREE.Scene();
   if(THREE.RoomEnvironment){const pm=new THREE.PMREMGenerator(renderer);scene.environment=pm.fromScene(new THREE.RoomEnvironment(),.04).texture}
   cam=new THREE.PerspectiveCamera(32,1,.1,50);cam.position.set(2.6,1.2,4.4);
@@ -537,17 +538,19 @@ function init(){
   const dring=new THREE.Mesh(new THREE.TorusGeometry(.06,.012,8,24),snapM);dring.position.set(.1,-1.12,-.3);strapG.add(dring);group.add(strapG);
   ctl=new THREE.OrbitControls(cam,cv);ctl.enablePan=false;ctl.enableDamping=true;ctl.minDistance=3.2;ctl.maxDistance=7;ctl.target.set(0,.2,0);ctl.autoRotate=!reduce;ctl.autoRotateSpeed=1.6;
   $('#tSpin').setAttribute('aria-pressed',ctl.autoRotate);
+  ctl.addEventListener('change',()=>need=true);
   ctl.addEventListener('start',()=>{if(mode==='rotate')$('#tip').style.opacity=0});
   ray=new THREE.Raycaster();mv=new THREE.Vector2();
   ok=true;buildModel();applyParts();applyFinish();compose();resize();
   new ResizeObserver(resize).observe(stage);
-  (function loop(){requestAnimationFrame(loop);if(document.hidden)return;ctl.update();renderer.render(scene,cam)})();
+  new IntersectionObserver(es=>{vis=es[0].isIntersecting;need=true},{rootMargin:'100px'}).observe(stage);
+  (function loop(){requestAnimationFrame(loop);if(document.hidden||!vis)return;const ch=ctl.update();if(ch||need||ctl.autoRotate){renderer.render(scene,cam);need=false}})();
 }
-function resize(){if(!ok)return;const r=stage.getBoundingClientRect();renderer.setSize(r.width,r.height,false);cam.aspect=r.width/r.height;cam.updateProjectionMatrix()}
+function resize(){if(!ok)return;need=true;const r=stage.getBoundingClientRect();renderer.setSize(r.width,r.height,false);cam.aspect=r.width/r.height;cam.updateProjectionMatrix()}
 function applyFinish(){if(!ok)return;const m=shell.material;const F={Gloss:[.18,0,1,.55],Matte:[.85,0,0,.55],Satin:[.48,0,.25,.55],'Metal flake':[.35,.55,1,.6],Candy:[.12,.35,1,.7],Chrome:[.07,1,1,1.25]}[S.fin];
-  m.roughness=F[0];m.metalness=F[1];m.clearcoat=F[2];m.envMapIntensity=F[3];m.needsUpdate=true}
+  m.roughness=F[0];m.metalness=F[1];m.clearcoat=F[2];m.envMapIntensity=F[3];m.needsUpdate=true;need=true}
 const lin=c=>new THREE.Color(c).convertSRGBToLinear();
-function applyParts(){if(!ok)return;visorM.visible=S.visor!=='No visor';
+function applyParts(){if(!ok)return;need=true;visorM.visible=S.visor!=='No visor';
   visorM.material.color.copy(lin({'Snap visor':'#111111','Tortoise':'#6a3a14','Colour‑matched':S.base,'Custom colour':S.visorC}[S.visor]||'#111111'));
   strapG.children.forEach(c=>{if(c.userData.strap)c.material.color.copy(lin(STRAPS[S.strap]))});
   liner.material.color.copy(lin(LINERS[S.liner]));const sn=SNAPS[S.snap];snapM.color.copy(lin(sn[0]));snapM.metalness=sn[1];snapM.roughness=sn[2]}
@@ -684,13 +687,15 @@ function specText(){const L=['Hi BRAP! I designed this helmet on your website:',
   if(D.some(d=>d.type==='image'))L.push('','I will send my artwork files too.');
   L.push('','Can you quote me a price and size?');return L.join('\n')}
 function sum(){$('#sumName').textContent=S.model+' · '+S.baseN.replace(/^Custom .*/,'Custom')+(S.pat!=='Solid'?' '+S.pat.toLowerCase():'')}
-$('#orderBtn').onclick=()=>{if(ok){showSel=false;compose();ctl.update();renderer.render(scene,cam);$('#shot').src=cv.toDataURL('image/png');showSel=true;compose()}else $('#shot').style.display='none';$('#spec').textContent=specText();$('#copied').textContent='';$('#dlg').showModal()};
+$('#orderBtn').onclick=()=>{if(ok){showSel=false;composeNow();ctl.update();renderer.render(scene,cam);$('#shot').src=cv.toDataURL('image/png');showSel=true;composeNow()}else $('#shot').style.display='none';$('#spec').textContent=specText();$('#copied').textContent='';$('#dlg').showModal()};
 $('#dx').onclick=()=>$('#dlg').close();$('#dlg').addEventListener('click',e=>{if(e.target.id==='dlg')$('#dlg').close()});
 $('#copySpec').onclick=()=>{try{navigator.clipboard.writeText(specText()).then(()=>$('#copied').textContent='Copied. Paste it into your message with the picture.',()=>$('#copied').textContent='Select the text above to copy it.')}catch(e){$('#copied').textContent='Select the text above to copy it.'}};
 syncUI();drawAlpha();compose();snap();
 const fl=['700 40px "Caveat Brush"','40px Anton','40px Rye','800 40px Archivo','italic 800 40px Archivo'];
-const fontsP=document.fonts?Promise.race([Promise.all(fl.map(f=>document.fonts.load(f).catch(()=>{}))),new Promise(r=>setTimeout(r,2500))]):Promise.resolve();
-fontsP.then(()=>{init();compose.k=null;compose()});
+const fontsP=document.fonts?Promise.race([Promise.all(fl.map(f=>document.fonts.load(f).catch(()=>{}))),new Promise(r=>setTimeout(r,1200))]):Promise.resolve();
+const go=()=>fontsP.then(()=>{init();compose.k=null;compose()});
+if('IntersectionObserver' in window){const io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)){io.disconnect();go()}},{rootMargin:'900px'});io.observe(stage)}else go();
+if(document.fonts)document.fonts.ready.then(()=>{compose.k=null;compose()});
 })();
 </script>
 
